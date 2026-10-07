@@ -1,0 +1,1734 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <title>Teleprompter Studio Pro</title>
+  <style>
+    :root {
+      --accent: #ff3b30;
+      --accent-glow: rgba(255, 59, 48, 0.45);
+      --blue: #0a84ff;
+      --green: #30d158;
+      --glass-bg: rgba(22, 22, 26, 0.72);
+      --glass-elevated: rgba(30, 30, 36, 0.82);
+      --glass-border: rgba(255, 255, 255, 0.12);
+      --glass-border-light: rgba(255, 255, 255, 0.22);
+      --safe-top: env(safe-area-inset-top, 20px);
+      --safe-bottom: env(safe-area-inset-bottom, 20px);
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      -webkit-tap-highlight-color: transparent;
+      user-select: none;
+      -webkit-user-select: none;
+    }
+
+    html, body {
+      background: #000;
+      color: #fff;
+      font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", -apple-system-body, sans-serif;
+      -webkit-font-smoothing: antialiased;
+      overflow: hidden;
+      height: 100vh;
+      width: 100vw;
+      position: fixed;
+      overscroll-behavior: none;
+      -webkit-overflow-scrolling: auto;
+    }
+
+    /* Video de cámara y capas de video */
+    #camera {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      transform: scaleX(-1);
+      z-index: 1;
+      background: #050505;
+    }
+
+    /* Zona del Teleprompter orientada al contacto ocular */
+    #prompter-wrapper {
+      position: absolute;
+      top: calc(var(--safe-top) + 24px);
+      left: 50%;
+      transform: translateX(-50%);
+      width: min(92vw, 360px);
+      height: 48vh;
+      overflow: hidden;
+      z-index: 10;
+      pointer-events: auto;
+      touch-action: none;
+      border-radius: 20px;
+      transition: background-color 0.2s ease;
+      mask-image: linear-gradient(to bottom, transparent 0%, black 15%, black 85%, transparent 100%);
+      -webkit-mask-image: linear-gradient(to bottom, transparent 0%, black 15%, black 85%, transparent 100%);
+    }
+
+    /* Guía visual de enfoque ocular anamórfico de estudio */
+    .reading-eye-line {
+      position: absolute;
+      top: 26%;
+      left: 6px;
+      right: 6px;
+      height: 54px;
+      border-radius: 16px;
+      border: 0.5px solid rgba(255, 255, 255, 0.22);
+      background: linear-gradient(90deg, rgba(10, 132, 255, 0.06) 0%, rgba(255, 255, 255, 0.1) 50%, rgba(10, 132, 255, 0.06) 100%);
+      box-shadow: 0 4px 24px rgba(0, 0, 0, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.25);
+      pointer-events: none;
+      z-index: 9;
+    }
+
+    .reading-eye-line::before {
+      content: '';
+      position: absolute;
+      left: 10px;
+      top: 50%;
+      transform: translateY(-50%);
+      width: 3px;
+      height: 18px;
+      border-radius: 999px;
+      background: var(--blue);
+      box-shadow: 0 0 10px var(--blue);
+    }
+
+    #prompter-content {
+      position: absolute;
+      width: 100%;
+      top: 0;
+      left: 0;
+      font-size: 28px;
+      font-weight: 700;
+      line-height: 1.45;
+      letter-spacing: -0.018em;
+      text-align: center;
+      color: #ffffff;
+      text-shadow: 0 1px 3px rgba(0,0,0,0.85), 0 4px 16px rgba(0,0,0,0.9);
+      will-change: transform;
+      transform: translate3d(0, 0, 0);
+      padding: 0 14px;
+    }
+
+    /* Transformaciones de modo espejo aplicadas exclusivamente al texto de lectura */
+    #prompter-content.mirrored-h {
+      transform: scaleX(-1) translate3d(0, 0, 0);
+    }
+    #prompter-content.mirrored-v {
+      transform: scaleY(-1) translate3d(0, 0, 0);
+    }
+    #prompter-content.mirrored-both {
+      transform: scale(-1, -1) translate3d(0, 0, 0);
+    }
+
+    /* Barra de ritmo / Progreso visual de lectura */
+    .prompter-progress-track {
+      position: absolute;
+      bottom: 0;
+      left: 0;
+      width: 100%;
+      height: 3px;
+      background: rgba(255, 255, 255, 0.12);
+      z-index: 12;
+      pointer-events: none;
+    }
+
+    .prompter-progress-bar {
+      height: 100%;
+      width: 0%;
+      background: #0a84ff;
+      box-shadow: 0 0 8px #0a84ff;
+      transition: width 0.1s linear;
+    }
+
+    /* Modo Estudio Limpio: Desvanecer HUDs durante lectura */
+    body.clean-studio .top-hud,
+    body.clean-studio .micro-dock,
+    body.clean-studio .btn-circle {
+      opacity: 0 !important;
+      pointer-events: none !important;
+      transition: opacity 0.3s ease;
+    }
+
+    body.clean-studio .record-trigger {
+      opacity: 0.35;
+      transform: scale(0.85);
+      transition: all 0.3s ease;
+    }
+
+    /* Modal de Previsualización Instantánea de Toma */
+    #preview-modal {
+      position: fixed;
+      inset: 0;
+      background: rgba(0, 0, 0, 0.92);
+      backdrop-filter: blur(25px);
+      -webkit-backdrop-filter: blur(25px);
+      z-index: 120;
+      display: none;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: calc(var(--safe-top) + 20px) 20px calc(var(--safe-bottom) + 20px) 20px;
+    }
+
+    #preview-modal.active {
+      display: flex;
+    }
+
+    .preview-video-container {
+      width: 100%;
+      max-width: 380px;
+      height: 60vh;
+      border-radius: 20px;
+      overflow: hidden;
+      background: #000;
+      border: 1px solid var(--glass-border);
+      box-shadow: 0 16px 40px rgba(0,0,0,0.8);
+      position: relative;
+    }
+
+    #preview-video {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+    }
+
+    .preview-actions {
+      display: flex;
+      gap: 16px;
+      margin-top: 24px;
+      width: 100%;
+      max-width: 380px;
+    }
+
+    .btn-preview {
+      flex: 1;
+      padding: 13px 18px;
+      border-radius: 999px;
+      font-size: 14px;
+      font-weight: 600;
+      letter-spacing: -0.01em;
+      border: 0.5px solid transparent;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      backdrop-filter: blur(25px);
+      -webkit-backdrop-filter: blur(25px);
+      transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+
+    .btn-preview svg {
+      width: 16px;
+      height: 16px;
+      fill: currentColor;
+    }
+
+    .btn-preview:active {
+      transform: scale(0.95);
+    }
+
+    .btn-discard {
+      background: rgba(255, 59, 48, 0.15);
+      color: #ff453a;
+      border-color: rgba(255, 59, 48, 0.3);
+      box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
+    }
+
+    .btn-save {
+      background: var(--blue);
+      color: #ffffff;
+      border-color: rgba(255, 255, 255, 0.2);
+      box-shadow: 0 4px 18px rgba(10, 132, 255, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.28);
+    }
+
+    /* HUD Superior */
+    .top-hud {
+      position: absolute;
+      top: calc(var(--safe-top) + 8px);
+      left: 16px;
+      right: 16px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      z-index: 20;
+      pointer-events: auto;
+    }
+
+    .status-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 13px;
+      border-radius: 999px;
+      background: var(--glass-bg);
+      backdrop-filter: blur(30px) saturate(190%);
+      -webkit-backdrop-filter: blur(30px) saturate(190%);
+      border: 0.5px solid var(--glass-border);
+      box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.22), 0 4px 16px rgba(0,0,0,0.35);
+      font-size: 13px;
+      font-weight: 600;
+      color: #f5f5f7;
+      font-variant-numeric: tabular-nums;
+      transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+
+    .status-badge:active {
+      transform: scale(0.96);
+      background: rgba(40, 40, 48, 0.85);
+    }
+
+    .rec-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: #636366;
+      transition: all 0.3s ease;
+    }
+
+    .recording .rec-dot {
+      background: var(--accent);
+      box-shadow: 0 0 10px var(--accent-glow);
+      animation: pulse 1.2s infinite cubic-bezier(0.4, 0, 0.6, 1);
+    }
+
+    @keyframes pulse {
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50% { opacity: 0.25; transform: scale(0.75); }
+    }
+
+    /* Medidor VU de Audio */
+    .vu-meter-container {
+      display: flex;
+      align-items: center;
+      gap: 3px;
+      height: 14px;
+      padding: 0 4px;
+    }
+
+    .vu-bar {
+      width: 3px;
+      height: 100%;
+      background: rgba(255, 255, 255, 0.2);
+      border-radius: 2px;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .vu-fill {
+      position: absolute;
+      bottom: 0;
+      width: 100%;
+      height: 0%;
+      background: #30d158;
+      transition: height 0.08s ease;
+    }
+
+    .vu-fill.clip {
+      background: #ff453a !important;
+    }
+
+    /* Overlay Cuenta Regresiva 3-2-1 */
+    #countdown-overlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(0, 0, 0, 0.75);
+      backdrop-filter: blur(15px);
+      -webkit-backdrop-filter: blur(15px);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      z-index: 100;
+    }
+
+    #countdown-overlay.active {
+      display: flex;
+    }
+
+    .countdown-number {
+      font-size: 120px;
+      font-weight: 800;
+      color: #fff;
+      text-shadow: 0 0 40px rgba(255, 59, 48, 0.8);
+      animation: popIn 0.85s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+    }
+
+    @keyframes popIn {
+      0% { transform: scale(0.3); opacity: 0; }
+      50% { transform: scale(1.15); opacity: 1; }
+      100% { transform: scale(1); opacity: 0.9; }
+    }
+
+    /* Reading Focus Spotlight */
+    #prompter-content p {
+      opacity: 0.35;
+      transition: opacity 0.25s ease, filter 0.25s ease;
+      margin-bottom: 22px;
+      filter: blur(0.5px);
+    }
+
+    #prompter-content p.active-line {
+      opacity: 1;
+      filter: blur(0);
+      text-shadow: 0 2px 14px rgba(255, 255, 255, 0.6);
+    }
+
+    /* Gestor de Carpeta de Guiones */
+    .scripts-shelf {
+      display: flex;
+      gap: 8px;
+      overflow-x: auto;
+      padding-bottom: 8px;
+      margin-bottom: 12px;
+    }
+
+    .shelf-pill {
+      background: rgba(255, 255, 255, 0.1);
+      border: 0.5px solid var(--glass-border);
+      padding: 6px 13px;
+      border-radius: 999px;
+      font-size: 13px;
+      font-weight: 500;
+      color: #e5e5ea;
+      white-space: nowrap;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      transition: all 0.15s ease;
+    }
+
+    .shelf-pill span {
+      max-width: 130px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .shelf-pill:active {
+      transform: scale(0.96);
+    }
+
+    .shelf-pill.selected {
+      background: var(--blue);
+      border-color: rgba(255, 255, 255, 0.35);
+      color: #ffffff;
+      font-weight: 600;
+      box-shadow: 0 0 14px rgba(10, 132, 255, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.3);
+    }
+
+    /* Marco Tally cinematográfico adaptado al contorno curvo del iPhone */
+    body.recording::after {
+      content: '';
+      position: fixed;
+      inset: 6px;
+      border: 3px solid rgba(255, 59, 48, 0.7);
+      border-radius: 46px;
+      pointer-events: none;
+      z-index: 99;
+      box-shadow: inset 0 0 18px rgba(255, 59, 48, 0.25), 0 0 10px rgba(255, 59, 48, 0.3);
+      animation: tallyPulse 2s infinite ease-in-out;
+    }
+
+    @keyframes tallyPulse {
+      0%, 100% { opacity: 0.9; }
+      50% { opacity: 0.45; }
+    }
+
+    /* Consola de Control Inferior */
+    .bottom-hud {
+      position: absolute;
+      bottom: calc(var(--safe-bottom) + 16px);
+      left: 0;
+      right: 0;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 14px;
+      z-index: 20;
+      pointer-events: auto;
+      padding: 0 16px;
+    }
+
+    .micro-dock {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      background: var(--glass-bg);
+      backdrop-filter: blur(35px) saturate(190%);
+      -webkit-backdrop-filter: blur(35px) saturate(190%);
+      border: 0.5px solid var(--glass-border);
+      padding: 5px 12px;
+      border-radius: 999px;
+      box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.2), 0 10px 30px rgba(0,0,0,0.55);
+    }
+
+    .micro-btn {
+      background: transparent;
+      border: none;
+      color: #f5f5f7;
+      font-size: 13px;
+      font-weight: 600;
+      padding: 6px 9px;
+      border-radius: 10px;
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      cursor: pointer;
+      transition: all 0.15s ease;
+    }
+
+    .micro-btn svg {
+      width: 14px;
+      height: 14px;
+      fill: currentColor;
+    }
+
+    .micro-btn:active {
+      background: rgba(255, 255, 255, 0.12);
+      transform: scale(0.94);
+    }
+
+    .val-display {
+      font-size: 13px;
+      font-weight: 700;
+      font-variant-numeric: tabular-nums;
+      min-width: 62px;
+      text-align: center;
+      color: var(--blue);
+      letter-spacing: -0.02em;
+    }
+
+    /* Barra principal de acción (Glass Elevated) */
+    .action-dock {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 28px;
+      width: 100%;
+    }
+
+    .btn-circle {
+      width: 54px;
+      height: 54px;
+      border-radius: 50%;
+      background: var(--glass-bg);
+      backdrop-filter: blur(35px) saturate(190%);
+      -webkit-backdrop-filter: blur(35px) saturate(190%);
+      border: 0.5px solid var(--glass-border-light);
+      color: #fff;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      box-shadow: inset 0 1px 0 rgba(255,255,255,0.22), 0 8px 24px rgba(0,0,0,0.45);
+      transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+
+    .btn-circle svg {
+      width: 20px;
+      height: 20px;
+      fill: currentColor;
+    }
+
+    .btn-circle:active {
+      transform: scale(0.9);
+      background: rgba(35, 35, 42, 0.9);
+    }
+
+    /* Botón Shutter Cinemático */
+    .record-trigger {
+      width: 78px;
+      height: 78px;
+      border-radius: 50%;
+      background: rgba(255, 255, 255, 0.08);
+      border: 3.5px solid #ffffff;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      box-shadow: 0 10px 30px rgba(0,0,0,0.6);
+      transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+
+    .record-trigger:active {
+      transform: scale(0.92);
+    }
+
+    .record-trigger-inner {
+      width: 60px;
+      height: 60px;
+      border-radius: 50%;
+      background: var(--accent);
+      box-shadow: 0 0 15px var(--accent-glow);
+      transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+
+    .recording .record-trigger-inner {
+      width: 28px;
+      height: 28px;
+      border-radius: 8px;
+      box-shadow: 0 0 20px var(--accent-glow);
+    }
+
+    /* Controles de Formato y Alineación */
+    .format-pills {
+      display: flex;
+      gap: 6px;
+      margin-top: 10px;
+    }
+
+    .format-btn {
+      flex: 1;
+      padding: 6px;
+      font-size: 13px;
+      font-weight: 600;
+      background: rgba(255, 255, 255, 0.1);
+      border: 1px solid var(--glass-border);
+      border-radius: 8px;
+      color: #fff;
+      cursor: pointer;
+    }
+
+    .format-btn.active {
+      background: #0a84ff;
+      border-color: #0a84ff;
+    }
+
+    /* Modal de Edición estilo iOS Inset Grouped */
+    #editor-modal {
+      position: fixed;
+      inset: 0;
+      background: rgba(14, 14, 18, 0.94);
+      backdrop-filter: blur(40px) saturate(180%);
+      -webkit-backdrop-filter: blur(40px) saturate(180%);
+      z-index: 50;
+      display: none;
+      flex-direction: column;
+      padding: calc(var(--safe-top) + 12px) 18px calc(var(--safe-bottom) + 16px) 18px;
+      overflow-y: auto;
+    }
+
+    #editor-modal.active {
+      display: flex;
+    }
+
+    .modal-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 14px;
+      padding: 0 4px;
+    }
+
+    .modal-title {
+      font-size: 18px;
+      font-weight: 700;
+      letter-spacing: -0.02em;
+    }
+
+    .btn-done {
+      background: var(--blue);
+      border: none;
+      color: #fff;
+      font-weight: 600;
+      font-size: 14px;
+      padding: 7px 18px;
+      border-radius: 999px;
+      cursor: pointer;
+      box-shadow: 0 2px 10px rgba(10, 132, 255, 0.35);
+      transition: all 0.15s ease;
+    }
+
+    .btn-done:active {
+      transform: scale(0.94);
+    }
+
+    .ios-card {
+      background: rgba(255, 255, 255, 0.06);
+      border: 0.5px solid var(--glass-border);
+      border-radius: 16px;
+      padding: 14px;
+      margin-bottom: 12px;
+      box-shadow: inset 0 1px 0 rgba(255,255,255,0.08);
+    }
+
+    #script-editor-input {
+      width: 100%;
+      height: 180px;
+      background: transparent;
+      border: none;
+      color: #fff;
+      font-size: 16px;
+      line-height: 1.5;
+      outline: none;
+      resize: none;
+      font-family: inherit;
+      user-select: text;
+      -webkit-user-select: text;
+    }
+
+    .slider-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      margin-top: 10px;
+      font-size: 13px;
+      color: rgba(255, 255, 255, 0.8);
+      font-weight: 500;
+    }
+
+    .slider-row input[type="range"] {
+      flex: 1;
+      -webkit-appearance: none;
+      appearance: none;
+      height: 6px;
+      border-radius: 999px;
+      background: rgba(255, 255, 255, 0.14);
+      outline: none;
+    }
+
+    .slider-row input[type="range"]::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      appearance: none;
+      width: 18px;
+      height: 18px;
+      border-radius: 50%;
+      background: #ffffff;
+      box-shadow: 0 2px 6px rgba(0, 0, 0, 0.45);
+      cursor: pointer;
+    }
+
+    /* Ocultar barras de scroll feas en carruseles y editor */
+    .scripts-shelf::-webkit-scrollbar,
+    #editor-modal::-webkit-scrollbar {
+      display: none;
+    }
+    .scripts-shelf,
+    #editor-modal {
+      -ms-overflow-style: none;
+      scrollbar-width: none;
+    }
+
+    /* Borde reactivo al grabar */
+    .recording #recording-badge {
+      border-color: rgba(255, 59, 48, 0.5);
+      box-shadow: 0 0 16px rgba(255, 59, 48, 0.25), inset 0 1px 0 rgba(255, 255, 255, 0.2);
+    }
+
+    .slider-val {
+      min-width: 46px;
+      text-align: right;
+      font-weight: 600;
+      color: var(--blue);
+      font-variant-numeric: tabular-nums;
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Lienzo de Video -->
+  <video id="camera" autoplay playsinline muted></video>
+
+  <!-- HUD Superior: Telemetría y Controles Descongestionados -->
+  <div class="top-hud">
+    <div class="status-badge" id="recording-badge">
+      <div class="rec-dot"></div>
+      <span id="timer-display">00:00</span>
+      <span style="opacity: 0.25;">/</span>
+      <!-- VU Meter de Audio Integrado -->
+      <div class="vu-meter-container" title="Nivel de audio">
+        <div class="vu-bar"><div class="vu-fill" id="vu-level"></div></div>
+      </div>
+      <span style="opacity: 0.25;">/</span>
+      <span id="metrics-display" style="color: var(--green);">0 wpm</span>
+    </div>
+
+    <div style="display: flex; gap: 6px;">
+      <!-- Botón Modo Estudio Limpio -->
+      <button class="status-badge" onclick="toggleCleanStudio()" title="Modo Visual Limpio">
+        <svg viewBox="0 0 24 24" style="width: 14px; height: 14px; fill: currentColor;"><path d="M12 4.5C7 4.5 2.73 7.61 1 12c1.73 4.39 6 7.5 11 7.5s9.27-3.11 11-7.5c-1.73-4.39-6-7.5-11-7.5zM12 17c-2.76 0-5-2.24-5-5s2.24-5 5-5 5 2.24 5 5-2.24 5-5 5zm0-8c-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3-1.34-3-3-3z"/></svg>
+      </button>
+
+      <!-- Selector de Cámara Frontal/Trasera -->
+      <button class="status-badge" onclick="switchCameraFacing()" title="Alternar Cámara">
+        <svg viewBox="0 0 24 24" style="width: 14px; height: 14px; fill: currentColor;"><path d="M20 4h-3.17L15 2H9L7.17 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm-8 13c-2.76 0-5-2.24-5-5s2.24-5 5-5 5 2.24 5 5-2.24 5-5 5z"/></svg>
+      </button>
+
+      <!-- Toggle de control por mando Bluetooth -->
+      <button class="status-badge" id="remote-btn" onclick="toggleRemoteMode()" title="Mando Bluetooth">
+        <svg viewBox="0 0 24 24" style="width: 14px; height: 14px; fill: currentColor;"><path d="M21 6H3c-1.1 0-2 .9-2 2v8c0 1.1.9 2 2 2h18c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2zm-10 7H8v3H6v-3H3v-2h3V8h2v3h3v2zm4.5 2c-.83 0-1.5-.67-1.5-1.5s.67-1.5 1.5-1.5 1.5.67 1.5 1.5-.67 1.5-1.5 1.5zm4-3c-.83 0-1.5-.67-1.5-1.5S18.67 9 19.5 9s1.5.67 1.5 1.5-.67 1.5-1.5 1.5z"/></svg>
+        <span id="remote-status" style="color: #8e8e93; font-size: 11px; margin-left: 2px;">OFF</span>
+      </button>
+
+      <!-- Acceso a Biblioteca de Guiones -->
+      <button class="status-badge" onclick="openEditor()" style="background: var(--glass-elevated);">
+        <svg viewBox="0 0 24 24" style="width: 14px; height: 14px; fill: currentColor;"><path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-5 14H7v-2h7v2zm3-4H7v-2h10v2zm0-4H7V7h10v2z"/></svg>
+      </button>
+    </div>
+  </div>
+
+  <!-- Pantalla de Conteo 3-2-1 -->
+  <div id="countdown-overlay">
+    <div class="countdown-number" id="countdown-text">3</div>
+  </div>
+
+  <!-- Capa de Lectura y Teleprompter -->
+  <div id="prompter-wrapper">
+    <div class="reading-eye-line"></div>
+    <div id="prompter-content"></div>
+    <div class="prompter-progress-track">
+      <div class="prompter-progress-bar" id="prompter-progress"></div>
+    </div>
+  </div>
+
+  <!-- Controles Inferiores -->
+  <div class="bottom-hud">
+    <!-- Ajustes rápidos -->
+    <div class="micro-dock">
+      <button class="micro-btn" onclick="changeSpeed(-5)">−</button>
+      <span class="val-display" id="speed-display">45 px/s</span>
+      <button class="micro-btn" onclick="changeSpeed(5)">+</button>
+      <span style="opacity: 0.3; margin: 0 4px;">|</span>
+      <button class="micro-btn" onclick="changeFontSize(-2)">A−</button>
+      <button class="micro-btn" onclick="changeFontSize(2)">A+</button>
+      <span style="opacity: 0.3; margin: 0 4px;">|</span>
+      <button class="micro-btn" onclick="cycleMirrorMode()" id="btn-mirror">🪞 Normal</button>
+    </div>
+
+    <!-- Acciones Principales -->
+    <div class="action-dock">
+      <button class="btn-circle" onclick="resetPrompter()" title="Reiniciar">⏮</button>
+      
+      <div class="record-trigger" onclick="toggleRecording()" id="shutter-btn">
+        <div class="record-trigger-inner"></div>
+      </div>
+
+      <button class="btn-circle" onclick="toggleScroll()" id="play-pause-btn" title="Iniciar/Pausar">▶</button>
+    </div>
+  </div>
+
+  <!-- Modal de Previsualización Instantánea de Toma -->
+  <div id="preview-modal">
+    <div class="preview-video-container">
+      <video id="preview-video" playsinline controls></video>
+    </div>
+    <div class="preview-actions">
+      <button class="btn-preview btn-discard" onclick="discardLastRecording()">
+        <svg viewBox="0 0 24 24"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg>
+        <span>Descartar</span>
+      </button>
+      <button class="btn-preview btn-save" onclick="downloadLastRecording()">
+        <svg viewBox="0 0 24 24"><path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/></svg>
+        <span>Guardar en Fotos</span>
+      </button>
+    </div>
+  </div>
+
+  <!-- Editor Modal con Inset Cards -->
+  <div id="editor-modal">
+    <div class="modal-header">
+      <span class="modal-title">Biblioteca y Ajustes</span>
+      <button class="btn-done" onclick="closeEditor()">Listo</button>
+    </div>
+
+    <!-- Carrusel de selección de guiones -->
+    <div class="scripts-shelf" id="scripts-shelf"></div>
+
+    <div style="display: flex; gap: 8px; margin-bottom: 12px; flex-wrap: wrap;">
+      <button class="shelf-pill" onclick="createNewScript()">
+        <svg viewBox="0 0 24 24" style="width: 12px; height: 12px; fill: currentColor;"><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/></svg>
+        <span>Nuevo</span>
+      </button>
+      <label class="shelf-pill" style="cursor: pointer;">
+        <svg viewBox="0 0 24 24" style="width: 12px; height: 12px; fill: currentColor;"><path d="M9 16h6v-6h4l-7-7-7 7h4zm-4 2h14v2H5z"/></svg>
+        <span>Importar TXT</span>
+        <input type="file" id="file-uploader" accept=".txt,.md" style="display: none;" onchange="handleFileUpload(event)">
+      </label>
+      <button class="shelf-pill" onclick="exportLibraryJSON()">
+        <svg viewBox="0 0 24 24" style="width: 12px; height: 12px; fill: currentColor;"><path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/></svg>
+        <span>Backup JSON</span>
+      </button>
+      <label class="shelf-pill" style="cursor: pointer;">
+        <svg viewBox="0 0 24 24" style="width: 12px; height: 12px; fill: currentColor;"><path d="M10 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z"/></svg>
+        <span>Restaurar</span>
+        <input type="file" id="json-uploader" accept=".json" style="display: none;" onchange="importLibraryJSON(event)">
+      </label>
+      <button class="shelf-pill" onclick="deleteCurrentScript()" style="color: var(--accent); border-color: rgba(255,59,48,0.3);">
+        <svg viewBox="0 0 24 24" style="width: 12px; height: 12px; fill: currentColor;"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg>
+        <span>Eliminar</span>
+      </button>
+    </div>
+
+    <!-- Tarjeta 1: Editor de Texto -->
+    <div class="ios-card">
+      <textarea id="script-editor-input" spellcheck="false" placeholder="Escribe o pega aquí tu discurso..."></textarea>
+    </div>
+
+    <!-- Tarjeta 2: Ergonomía de Lectura -->
+    <div class="ios-card">
+      <div class="slider-row">
+        <span>Ancho de Lectura</span>
+        <input type="range" id="column-width-slider" min="260" max="420" step="10" oninput="updateColumnWidth(this.value)">
+        <span class="slider-val" id="col-width-val">340px</span>
+      </div>
+      <div class="slider-row">
+        <span>Opacidad de Fondo</span>
+        <input type="range" id="bg-opacity-slider" min="0" max="90" step="5" oninput="updateBgOpacity(this.value)">
+        <span class="slider-val" id="bg-opacity-val">35%</span>
+      </div>
+      <div class="slider-row">
+        <span>Posición Ocular (Lente)</span>
+        <input type="range" id="eye-pos-slider" min="0" max="120" step="5" oninput="updateEyePosition(this.value)">
+        <span class="slider-val" id="eye-pos-val">24px</span>
+      </div>
+      <div class="slider-row">
+        <span>Interlineado</span>
+        <input type="range" id="line-height-slider" min="1.1" max="2.0" step="0.05" oninput="updateLineHeight(this.value)">
+        <span class="slider-val" id="line-height-val">1.45</span>
+      </div>
+      <div class="format-pills">
+        <button class="format-btn" id="align-left-btn" onclick="setTextAlignment('left')">Izquierda</button>
+        <button class="format-btn" id="align-center-btn" onclick="setTextAlignment('center')">Centrado</button>
+        <button class="format-btn" id="align-right-btn" onclick="setTextAlignment('right')">Derecha</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // --- 1. PERSISTENCIA Y ESTADO BASE ---
+    const DEFAULT_SCRIPT = `Bienvenido al Teleprompter Profesional de Estudio.
+
+Mantén el contacto visual directo con la lente superior de tu iPhone.
+
+La columna de texto estrecha elimina el escaneo lateral de los ojos, permitiéndote sonar natural, autoritario y seguro.
+
+El desplazamiento se calcula por delta de tiempo real en la GPU a 60 FPS estables.
+
+Pulsa el botón rojo para grabar tu toma con audio de alta fidelidad.`;
+
+    // Colección de guiones por defecto
+    const DEFAULT_LIBRARY = [
+      { id: "1", title: "Discurso Principal", text: DEFAULT_SCRIPT },
+      { id: "2", title: "Pitch Elevador", text: "Hola, este es un pitch breve de 30 segundos.\n\nDirecto al grano, sin titubeos y manteniendo el ritmo constante de tu lectura." }
+    ];
+
+    let library = JSON.parse(localStorage.getItem('studio_library') || 'null') || DEFAULT_LIBRARY;
+    let activeScriptId = localStorage.getItem('studio_active_id') || library[0].id;
+
+    let state = {
+      script: (library.find(s => s.id === activeScriptId) || library[0]).text,
+      speed: parseInt(localStorage.getItem('studio_speed') || '45', 10),
+      fontSize: parseInt(localStorage.getItem('studio_font_size') || '28', 10),
+      lineHeight: parseFloat(localStorage.getItem('studio_line_height') || '1.45'),
+      textAlign: localStorage.getItem('studio_text_align') || 'center',
+      columnWidth: parseInt(localStorage.getItem('studio_col_width') || '340', 10),
+      bgOpacity: parseInt(localStorage.getItem('studio_bg_opacity') || '35', 10),
+      eyeTop: parseInt(localStorage.getItem('studio_eye_top') || '24', 10),
+      remoteEnabled: localStorage.getItem('studio_remote_enabled') === 'true',
+      cleanStudio: false,
+      facingMode: localStorage.getItem('studio_facing_mode') || 'user',
+      mirrorMode: parseInt(localStorage.getItem('studio_mirror_mode') || '0', 10),
+      isScrolling: false,
+      isRecording: false,
+      offset: 0,
+      recordedSeconds: 0,
+      takeCount: parseInt(localStorage.getItem('studio_take_count') || '1', 10)
+    };
+
+    // Cache estructural para Spotlight y Progreso (Cero lecturas DOM a 60 FPS)
+    let paragraphMetricsCache = [];
+    let totalScrollableHeight = 1;
+    let pendingVideoBlob = null;
+    let pendingVideoURL = null;
+
+    const prompterTextEl = document.getElementById('prompter-content');
+    const prompterWrapper = document.getElementById('prompter-wrapper');
+    const timerDisplay = document.getElementById('timer-display');
+    const speedDisplay = document.getElementById('speed-display');
+    const playPauseBtn = document.getElementById('play-pause-btn');
+    const editorModal = document.getElementById('editor-modal');
+    const scriptInput = document.getElementById('script-editor-input');
+
+    const metricsDisplay = document.getElementById('metrics-display');
+
+    const progressBar = document.getElementById('prompter-progress');
+
+    // Renderizado y cacheo matemático de alturas de párrafos (Zero DOM Thrashing)
+    function renderPrompterText() {
+      const paragraphs = state.script.split(/\n+/).filter(Boolean);
+      prompterTextEl.innerHTML = paragraphs.map((p, idx) => `<p data-idx="${idx}">${p}</p>`).join('');
+      rebuildLayoutCache();
+    }
+
+    function rebuildLayoutCache() {
+      requestAnimationFrame(() => {
+        const pElements = prompterTextEl.querySelectorAll('p');
+        paragraphMetricsCache = [];
+        pElements.forEach(p => {
+          paragraphMetricsCache.push({
+            el: p,
+            top: p.offsetTop,
+            bottom: p.offsetTop + p.offsetHeight
+          });
+        });
+        totalScrollableHeight = Math.max(1, prompterTextEl.scrollHeight - prompterWrapper.offsetHeight * 0.5);
+        updateSpotlightFast();
+      });
+    }
+
+    function updateSpotlightFast() {
+      if (!paragraphMetricsCache.length) return;
+      const eyeLineTarget = state.offset + (prompterWrapper.offsetHeight * 0.28);
+
+      for (let i = 0; i < paragraphMetricsCache.length; i++) {
+        const p = paragraphMetricsCache[i];
+        if (eyeLineTarget >= p.top - 15 && eyeLineTarget <= p.bottom + 15) {
+          p.el.classList.add('active-line');
+        } else {
+          p.el.classList.remove('active-line');
+        }
+      }
+
+      // Actualizar barra de progreso suavemente
+      const progressPercent = Math.min(100, Math.max(0, (state.offset / totalScrollableHeight) * 100));
+      progressBar.style.width = `${progressPercent}%`;
+    }
+
+    // Inicializar GUI, Mando y Métricas
+    function applyStyles() {
+      renderPrompterText();
+      prompterTextEl.style.fontSize = `${state.fontSize}px`;
+      prompterWrapper.style.width = `${state.columnWidth}px`;
+      prompterWrapper.style.backgroundColor = `rgba(0, 0, 0, ${state.bgOpacity / 100})`;
+      speedDisplay.innerText = `${state.speed} px/s`;
+      
+      document.getElementById('column-width-slider').value = state.columnWidth;
+      document.getElementById('col-width-val').innerText = `${state.columnWidth}px`;
+      
+      const opacitySlider = document.getElementById('bg-opacity-slider');
+      if (opacitySlider) opacitySlider.value = state.bgOpacity;
+      const opacityVal = document.getElementById('bg-opacity-val');
+      if (opacityVal) opacityVal.innerText = `${state.bgOpacity}%`;
+
+      // Posición del prompter relativa al lente de cámara
+      prompterWrapper.style.top = `calc(var(--safe-top) + ${state.eyeTop}px)`;
+      const eyePosSlider = document.getElementById('eye-pos-slider');
+      if (eyePosSlider) eyePosSlider.value = state.eyeTop;
+      const eyePosVal = document.getElementById('eye-pos-val');
+      if (eyePosVal) eyePosVal.innerText = `${state.eyeTop}px`;
+
+      // Interlineado y alineación
+      prompterTextEl.style.lineHeight = state.lineHeight;
+      prompterTextEl.style.textAlign = state.textAlign;
+      const lhSlider = document.getElementById('line-height-slider');
+      if (lhSlider) lhSlider.value = state.lineHeight;
+      const lhVal = document.getElementById('line-height-val');
+      if (lhVal) lhVal.innerText = state.lineHeight.toFixed(2);
+
+      updateAlignButtonsUI();
+      updateRemoteStatusUI();
+      updateMirrorUI();
+      calculateMetrics();
+    }
+
+    function updateLineHeight(val) {
+      state.lineHeight = parseFloat(val);
+      prompterTextEl.style.lineHeight = state.lineHeight;
+      document.getElementById('line-height-val').innerText = state.lineHeight.toFixed(2);
+      localStorage.setItem('studio_line_height', state.lineHeight);
+      rebuildLayoutCache();
+    }
+
+    function setTextAlignment(align) {
+      state.textAlign = align;
+      prompterTextEl.style.textAlign = align;
+      localStorage.setItem('studio_text_align', align);
+      updateAlignButtonsUI();
+      rebuildLayoutCache();
+    }
+
+    function updateAlignButtonsUI() {
+      ['left', 'center', 'right'].forEach(a => {
+        const btn = document.getElementById(`align-${a}-btn`);
+        if (btn) btn.classList.toggle('active', state.textAlign === a);
+      });
+    }
+
+    // Tocar el fondo de la pantalla en modo limpio para Play / Pause
+    document.getElementById('camera').addEventListener('click', () => {
+      if (state.cleanStudio) {
+        toggleScroll();
+      }
+    });
+
+    function updateEyePosition(val) {
+      state.eyeTop = parseInt(val, 10);
+      prompterWrapper.style.top = `calc(var(--safe-top) + ${state.eyeTop}px)`;
+      document.getElementById('eye-pos-val').innerText = `${state.eyeTop}px`;
+      localStorage.setItem('studio_eye_top', state.eyeTop);
+    }
+
+    function toggleCleanStudio() {
+      state.cleanStudio = !state.cleanStudio;
+      document.body.classList.toggle('clean-studio', state.cleanStudio);
+      triggerHaptic(20);
+    }
+
+    function calculateMetrics() {
+      const words = state.script.trim().split(/\s+/).filter(Boolean).length;
+      const totalHeight = prompterTextEl.scrollHeight || 1;
+      const totalSeconds = totalHeight / state.speed;
+      const wpm = totalSeconds > 0 ? Math.round((words / totalSeconds) * 60) : 0;
+      
+      const remSec = Math.max(0, Math.round((totalHeight - state.offset) / state.speed));
+      const remMins = String(Math.floor(remSec / 60)).padStart(2, '0');
+      const remSecs = String(remSec % 60).padStart(2, '0');
+
+      metricsDisplay.innerText = `${wpm} WPM · ⏳${remMins}:${remSecs}`;
+    }
+
+    function updateBgOpacity(val) {
+      state.bgOpacity = val;
+      prompterWrapper.style.backgroundColor = `rgba(0, 0, 0, ${val / 100})`;
+      document.getElementById('bg-opacity-val').innerText = `${val}%`;
+      localStorage.setItem('studio_bg_opacity', val);
+    }
+    applyStyles();
+
+    // --- MEJORA 6: WAKE LOCK API (PANTALLA SIEMPRE ENCENDIDA) ---
+    let wakeLockSentinel = null;
+    async function requestWakeLock() {
+      if ('wakeLock' in navigator) {
+        try {
+          wakeLockSentinel = await navigator.wakeLock.request('screen');
+        } catch (e) {
+          console.warn('Wake Lock no concedido:', e);
+        }
+      }
+    }
+    requestWakeLock();
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible') requestWakeLock();
+    });
+
+    // --- MEJORA 4: GESTOS TÁCTILES (DOBLE TAP Y SCRUBBING MANUAL) ---
+    let touchStartY = 0;
+    let touchStartOffset = 0;
+    let isDragging = false;
+    let lastTapTime = 0;
+
+    prompterWrapper.addEventListener('pointerdown', (e) => {
+      isDragging = true;
+      touchStartY = e.clientY;
+      touchStartOffset = state.offset;
+      prompterWrapper.setPointerCapture(e.pointerId);
+    });
+
+    prompterWrapper.addEventListener('pointermove', (e) => {
+      if (!isDragging) return;
+      const deltaY = touchStartY - e.clientY;
+      const maxScroll = Math.max(0, prompterTextEl.scrollHeight - 100);
+      state.offset = Math.max(0, Math.min(maxScroll, touchStartOffset + deltaY));
+      applyPrompterTransform();
+      calculateMetrics();
+    });
+
+    const endPointer = (e) => {
+      if (!isDragging) return;
+      isDragging = false;
+      try { prompterWrapper.releasePointerCapture(e.pointerId); } catch (_) {}
+
+      // Detección de doble toque para Play / Pause rápido
+      const currentTime = Date.now();
+      if (currentTime - lastTapTime < 280) {
+        toggleScroll();
+      }
+      lastTapTime = currentTime;
+    };
+
+    prompterWrapper.addEventListener('pointerup', endPointer);
+    prompterWrapper.addEventListener('pointercancel', endPointer);
+
+    // --- 2. PIPELINE DE CÁMARA Y AUDIO CON WEBRTC ---
+    let mediaStream = null;
+    let mediaRecorder = null;
+    let recordedChunks = [];
+    let recordInterval = null;
+
+    // --- AUDIO CONTEXT: VU METER Y PITIDOS SINTETIZADOS ---
+    let audioCtx = null;
+    let audioAnalyser = null;
+    let vuInterval = null;
+
+    function getAudioContext() {
+      if (!audioCtx) {
+        audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      }
+      if (audioCtx.state === 'suspended') {
+        audioCtx.resume();
+      }
+      return audioCtx;
+    }
+
+    function playBeep(freq = 880, duration = 0.08) {
+      const ctx = getAudioContext();
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.frequency.value = freq;
+      gain.gain.setValueAtTime(0.2, ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + duration);
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start();
+      osc.stop(ctx.currentTime + duration);
+    }
+
+    function setupVUMeter(stream) {
+      const audioTracks = stream.getAudioTracks();
+      if (!audioTracks.length) return;
+
+      const ctx = getAudioContext();
+      const source = ctx.createMediaStreamSource(stream);
+      audioAnalyser = ctx.createAnalyser();
+      audioAnalyser.fftSize = 64;
+      source.connect(audioAnalyser);
+
+      const dataArray = new Uint8Array(audioAnalyser.frequencyBinCount);
+      const vuFill = document.getElementById('vu-level');
+
+      let vuFrameId = null;
+      function renderVU() {
+        if (document.hidden || !audioAnalyser) {
+          vuFrameId = null;
+          return;
+        }
+        audioAnalyser.getByteFrequencyData(dataArray);
+        let sum = 0;
+        for (let i = 0; i < dataArray.length; i++) sum += dataArray[i];
+        const average = sum / dataArray.length;
+        const percent = Math.min(100, Math.round((average / 128) * 100));
+
+        vuFill.style.height = `${percent}%`;
+        vuFill.classList.toggle('clip', percent > 85);
+        vuFrameId = requestAnimationFrame(renderVU);
+      }
+      if (vuFrameId) cancelAnimationFrame(vuFrameId);
+      vuFrameId = requestAnimationFrame(renderVU);
+
+      // Desactivar procesamiento de audio si se sale de Safari
+      document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'visible') {
+          if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
+          if (!vuFrameId) vuFrameId = requestAnimationFrame(renderVU);
+        } else {
+          if (audioCtx && audioCtx.state === 'running') audioCtx.suspend();
+          if (vuFrameId) {
+            cancelAnimationFrame(vuFrameId);
+            vuFrameId = null;
+          }
+        }
+      });
+    }
+
+    async function initCamera() {
+      if (mediaStream) {
+        mediaStream.getTracks().forEach(track => track.stop());
+      }
+
+      const cameraEl = document.getElementById('camera');
+      const isFront = state.facingMode === 'user';
+      cameraEl.style.transform = isFront ? 'scaleX(-1)' : 'none';
+      document.getElementById('camera-facing-label').innerText = isFront ? 'Frontal' : 'Trasera';
+
+      try {
+        mediaStream = await navigator.mediaDevices.getUserMedia({
+          video: {
+            facingMode: state.facingMode,
+            width: { ideal: 1920 },
+            height: { ideal: 1080 }
+          },
+          audio: {
+            echoCancellation: false,
+            noiseSuppression: false,
+            autoGainControl: false
+          }
+        });
+        cameraEl.srcObject = mediaStream;
+        setupVUMeter(mediaStream);
+      } catch (err) {
+        console.warn("Fallo acceso completo, reintentando básico:", err);
+        try {
+          mediaStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: state.facingMode } });
+          cameraEl.srcObject = mediaStream;
+        } catch (videoErr) {
+          alert("Acceso a cámara denegado. Concede permisos en Ajustes > Safari.");
+        }
+      }
+    }
+    initCamera();
+
+    function switchCameraFacing() {
+      state.facingMode = state.facingMode === 'user' ? 'environment' : 'user';
+      localStorage.setItem('studio_facing_mode', state.facingMode);
+      initCamera();
+    }
+
+    // --- 3. MOTOR DE SCROLL CON DELTA TIME (60 FPS STABLE) ---
+    let lastTime = null;
+
+    function renderLoop(timestamp) {
+      if (!lastTime) lastTime = timestamp;
+      const deltaTime = (timestamp - lastTime) / 1000;
+      lastTime = timestamp;
+
+      if (state.isScrolling) {
+        state.offset += state.speed * deltaTime;
+        applyPrompterTransform();
+        updateSpotlightFast();
+      }
+
+      requestAnimationFrame(renderLoop);
+    }
+    requestAnimationFrame(renderLoop);
+
+    const playIcon = document.getElementById('play-icon');
+    const pauseIcon = document.getElementById('pause-icon');
+
+    function toggleScroll() {
+      state.isScrolling = !state.isScrolling;
+      updatePlayPauseIcons();
+    }
+
+    function applyPrompterTransform() {
+      let scaleTransform = '';
+      if (state.mirrorMode === 1) scaleTransform = 'scaleX(-1) ';
+      else if (state.mirrorMode === 2) scaleTransform = 'scaleY(-1) ';
+      else if (state.mirrorMode === 3) scaleTransform = 'scale(-1, -1) ';
+      prompterTextEl.style.transform = `${scaleTransform}translate3d(0, -${state.offset}px, 0)`;
+    }
+
+    function resetPrompter() {
+      state.offset = 0;
+      applyPrompterTransform();
+      state.isScrolling = false;
+      updatePlayPauseIcons();
+    }
+
+    function updatePlayPauseIcons() {
+      if (playIcon && pauseIcon) {
+        playIcon.style.display = state.isScrolling ? 'none' : 'block';
+        pauseIcon.style.display = state.isScrolling ? 'block' : 'none';
+      }
+    }
+
+    function changeSpeed(delta) {
+      state.speed = Math.max(10, Math.min(160, state.speed + delta));
+      speedDisplay.innerText = `${state.speed} px/s`;
+      localStorage.setItem('studio_speed', state.speed);
+      calculateMetrics();
+    }
+
+    function changeFontSize(delta) {
+      state.fontSize = Math.max(18, Math.min(48, state.fontSize + delta));
+      prompterTextEl.style.fontSize = `${state.fontSize}px`;
+      localStorage.setItem('studio_font_size', state.fontSize);
+      rebuildLayoutCache();
+      calculateMetrics();
+    }
+
+  function updateMirrorUI() {
+      const mirrorLabel = document.getElementById('mirror-label');
+      const mirrorBtn = document.getElementById('btn-mirror');
+      applyPrompterTransform();
+
+      switch(state.mirrorMode) {
+        case 0:
+          if (mirrorLabel) mirrorLabel.innerText = "Normal";
+          if (mirrorBtn) mirrorBtn.style.color = "#f5f5f7";
+          break;
+        case 1:
+          if (mirrorLabel) mirrorLabel.innerText = "H";
+          if (mirrorBtn) mirrorBtn.style.color = "var(--blue)";
+          break;
+        case 2:
+          if (mirrorLabel) mirrorLabel.innerText = "V";
+          if (mirrorBtn) mirrorBtn.style.color = "var(--green)";
+          break;
+        case 3:
+          if (mirrorLabel) mirrorLabel.innerText = "H+V";
+          if (mirrorBtn) mirrorBtn.style.color = "#ffd60a";
+          break;
+      }
+    }
+
+    function cycleMirrorMode() {
+      state.mirrorMode = (state.mirrorMode + 1) % 4;
+      localStorage.setItem('studio_mirror_mode', state.mirrorMode);
+      updateMirrorUI();
+    }
+
+    // --- 4. CUENTA REGRESIVA 3-2-1 Y GRABACIÓN ---
+    function toggleRecording() {
+      if (!state.isRecording) {
+        runCountdown(() => startRecording());
+      } else {
+        stopRecording();
+      }
+    }
+
+    function runCountdown(callback) {
+      const overlay = document.getElementById('countdown-overlay');
+      const text = document.getElementById('countdown-text');
+      overlay.classList.add('active');
+      let count = 3;
+
+      text.innerText = count;
+      playBeep(660);
+      triggerHaptic(35);
+
+      const interval = setInterval(() => {
+        count--;
+        if (count > 0) {
+          text.innerText = count;
+          text.style.animation = 'none';
+          void text.offsetWidth;
+          text.style.animation = 'popIn 0.85s cubic-bezier(0.175, 0.885, 0.32, 1.275)';
+          playBeep(660);
+          triggerHaptic(35);
+        } else {
+          clearInterval(interval);
+          overlay.classList.remove('active');
+          playBeep(1200, 0.2);
+          triggerHaptic([60, 40, 60]);
+          callback();
+        }
+      }, 1000);
+    }
+
+    function startRecording() {
+      if (!mediaStream) {
+        alert("Cámara no disponible.");
+        return;
+      }
+
+      recordedChunks = [];
+      
+      // Forzar High Profile H.264 con Bitrate Broadcast de 6 Mbps
+      const mimeTypes = ['video/mp4;codecs=avc1.640028', 'video/mp4;codecs=avc1', 'video/mp4', 'video/webm;codecs=h264'];
+      let selectedMime = mimeTypes.find(type => MediaRecorder.isTypeSupported(type)) || '';
+
+      const recorderOptions = {
+        videoBitsPerSecond: 6000000 // 6 Mbps alta fidelidad
+      };
+      if (selectedMime) recorderOptions.mimeType = selectedMime;
+
+      try {
+        mediaRecorder = new MediaRecorder(mediaStream, recorderOptions);
+      } catch (e) {
+        mediaRecorder = new MediaRecorder(mediaStream);
+      }
+
+      mediaRecorder.ondataavailable = (event) => {
+        if (event.data && event.data.size > 0) {
+          recordedChunks.push(event.data);
+        }
+      };
+
+      mediaRecorder.onstop = handleRecordingComplete;
+
+      mediaRecorder.start(1000);
+      state.isRecording = true;
+      document.body.classList.add('recording');
+      
+      if (!state.isScrolling) toggleScroll();
+
+      state.recordedSeconds = 0;
+      updateTimerDisplay();
+      recordInterval = setInterval(() => {
+        state.recordedSeconds++;
+        updateTimerDisplay();
+      }, 1000);
+    }
+
+    function stopRecording() {
+      if (!state.isRecording) return;
+      mediaRecorder.stop();
+      state.isRecording = false;
+      document.body.classList.remove('recording');
+      clearInterval(recordInterval);
+      
+      if (state.isScrolling) toggleScroll();
+    }
+
+    function updateTimerDisplay() {
+      const mins = String(Math.floor(state.recordedSeconds / 60)).padStart(2, '0');
+      const secs = String(state.recordedSeconds % 60).padStart(2, '0');
+      timerDisplay.innerText = `${mins}:${secs}`;
+    }
+
+    // --- GESTIÓN DE TOMAS Y PREVIEW FLOTANTE ---
+    function triggerHaptic(pattern = 30) {
+      if ('vibrate' in navigator) {
+        try { navigator.vibrate(pattern); } catch (_) {}
+      }
+    }
+
+    function handleRecordingComplete() {
+      triggerHaptic([40, 60, 40]);
+      pendingVideoBlob = new Blob(recordedChunks, { type: recordedChunks[0]?.type || 'video/mp4' });
+      if (pendingVideoURL) URL.revokeObjectURL(pendingVideoURL);
+      pendingVideoURL = URL.createObjectURL(pendingVideoBlob);
+
+      const previewModal = document.getElementById('preview-modal');
+      const previewVideo = document.getElementById('preview-video');
+      previewVideo.src = pendingVideoURL;
+      previewModal.classList.add('active');
+    }
+
+    function discardLastRecording() {
+      triggerHaptic(25);
+      const previewModal = document.getElementById('preview-modal');
+      const previewVideo = document.getElementById('preview-video');
+      previewVideo.pause();
+      previewVideo.src = '';
+      if (pendingVideoURL) URL.revokeObjectURL(pendingVideoURL);
+      pendingVideoBlob = null;
+      pendingVideoURL = null;
+      previewModal.classList.remove('active');
+    }
+
+    async function downloadLastRecording() {
+      if (!pendingVideoBlob) return;
+      triggerHaptic(50);
+      const activeScript = library.find(s => s.id === activeScriptId);
+      const cleanTitle = (activeScript ? activeScript.title : "Discurso")
+        .trim()
+        .replace(/[^a-zA-Z0-9_\-áéíóúÁÉÍÓÚñÑ]/g, "_");
+      const fileName = `${cleanTitle}_Toma${state.takeCount}.mp4`;
+
+      const videoFile = new File([pendingVideoBlob], fileName, { type: 'video/mp4' });
+
+      // Integración nativa iOS: Guardado directo a Fotos vía Web Share Sheet
+      if (navigator.canShare && navigator.canShare({ files: [videoFile] })) {
+        try {
+          await navigator.share({
+            files: [videoFile],
+            title: fileName
+          });
+          state.takeCount++;
+          localStorage.setItem('studio_take_count', state.takeCount);
+          discardLastRecording();
+          return;
+        } catch (shareErr) {
+          if (shareErr.name === 'AbortError') return; // Usuario canceló el modal
+          console.warn('Fallo Web Share, recurriendo a descarga tradicional:', shareErr);
+        }
+      }
+
+      // Fallback a descarga por ancla
+      const a = document.createElement('a');
+      a.style.display = 'none';
+      a.href = pendingVideoURL;
+      a.download = fileName;
+      document.body.appendChild(a);
+      a.click();
+      setTimeout(() => document.body.removeChild(a), 1000);
+
+      state.takeCount++;
+      localStorage.setItem('studio_take_count', state.takeCount);
+      discardLastRecording();
+    }
+
+    // --- 5. BIBLIOTECA DE GUIONES (CARPETA DE TEXTOS) ---
+    function renderShelf() {
+      const shelf = document.getElementById('scripts-shelf');
+      shelf.innerHTML = library.map(item => `
+        <div class="shelf-pill ${item.id === activeScriptId ? 'selected' : ''}" onclick="switchScript('${item.id}')">
+          <svg viewBox="0 0 24 24" style="width: 13px; height: 13px; fill: currentColor; margin-right: 4px;"><path d="M14 2H6c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6zm2 16H8v-2h8v2zm0-4H8v-2h8v2zm-3-5V3.5L18.5 9H13z"/></svg>
+          <span>${item.title}</span>
+        </div>
+      `).join('');
+    }
+
+    function switchScript(id) {
+      saveCurrentScriptInMemory();
+      activeScriptId = id;
+      localStorage.setItem('studio_active_id', id);
+      const active = library.find(s => s.id === id);
+      state.script = active.text;
+      scriptInput.value = active.text;
+      renderShelf();
+    }
+
+    function saveCurrentScriptInMemory() {
+      const active = library.find(s => s.id === activeScriptId);
+      if (active) {
+        active.text = scriptInput.value || DEFAULT_SCRIPT;
+        const firstLine = active.text.trim().split('\n')[0] || "Sin Título";
+        active.title = firstLine.substring(0, 18);
+        localStorage.setItem('studio_library', JSON.stringify(library));
+      }
+    }
+
+    function createNewScript() {
+      saveCurrentScriptInMemory();
+      const newId = String(Date.now());
+      const newScript = { id: newId, title: "Nuevo Guion", text: "Escribe tu nuevo discurso aquí..." };
+      library.push(newScript);
+      switchScript(newId);
+    }
+
+    function deleteCurrentScript() {
+      if (library.length <= 1) {
+        alert("Debes conservar al menos un guion.");
+        return;
+      }
+      library = library.filter(s => s.id !== activeScriptId);
+      switchScript(library[0].id);
+    }
+
+    function handleFileUpload(event) {
+      const file = event.target.files[0];
+      if (!file) return;
+
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        saveCurrentScriptInMemory();
+        const content = e.target.result;
+        const title = file.name.replace(/\.[^/.]+$/, "").substring(0, 18);
+        const newId = String(Date.now());
+        library.push({ id: newId, title: title, text: content });
+        switchScript(newId);
+      };
+      reader.readAsText(file);
+      event.target.value = '';
+    }
+
+    // Exportación y Restauración completa de biblioteca en JSON
+    function exportLibraryJSON() {
+      saveCurrentScriptInMemory();
+      const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(library, null, 2));
+      const dlAnchor = document.createElement('a');
+      dlAnchor.setAttribute("href", dataStr);
+      dlAnchor.setAttribute("download", `Teleprompter_Library_${Date.now()}.json`);
+      document.body.appendChild(dlAnchor);
+      dlAnchor.click();
+      dlAnchor.remove();
+      triggerHaptic(40);
+    }
+
+    function importLibraryJSON(event) {
+      const file = event.target.files[0];
+      if (!file) return;
+
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        try {
+          const imported = JSON.parse(e.target.result);
+          if (Array.isArray(imported) && imported.length > 0) {
+            library = imported;
+            localStorage.setItem('studio_library', JSON.stringify(library));
+            switchScript(library[0].id);
+            alert("Biblioteca restaurada con éxito.");
+          } else {
+            alert("El archivo no tiene el formato de biblioteca válido.");
+          }
+        } catch (err) {
+          alert("Error al leer el archivo JSON.");
+        }
+      };
+      reader.readAsText(file);
+      event.target.value = '';
+    }
+
+    // Autoguardado instantáneo al teclear para evitar pérdidas si se recarga la página
+    scriptInput.addEventListener('input', () => {
+      saveCurrentScriptInMemory();
+    });
+
+    function openEditor() {
+      if (state.isScrolling) toggleScroll();
+      renderShelf();
+      scriptInput.value = state.script;
+      editorModal.classList.add('active');
+    }
+
+    function closeEditor() {
+      saveCurrentScriptInMemory();
+      state.script = scriptInput.value || DEFAULT_SCRIPT;
+      editorModal.classList.remove('active');
+      renderPrompterText();
+      calculateMetrics();
+      resetPrompter();
+    }
+
+    // --- 6. SOPORTE DE MANDO BLUETOOTH / CLICKER CONDICIONAL ---
+    function toggleRemoteMode() {
+      state.remoteEnabled = !state.remoteEnabled;
+      localStorage.setItem('studio_remote_enabled', state.remoteEnabled);
+      triggerHaptic(state.remoteEnabled ? [30, 40, 30] : 20);
+      updateRemoteStatusUI();
+    }
+
+    function updateRemoteStatusUI() {
+      const statusEl = document.getElementById('remote-status');
+      const btnEl = document.getElementById('remote-btn');
+      if (state.remoteEnabled) {
+        statusEl.innerText = "ON";
+        statusEl.style.color = "#30d158";
+        btnEl.style.borderColor = "#30d158";
+      } else {
+        statusEl.innerText = "OFF";
+        statusEl.style.color = "#8e8e93";
+        btnEl.style.borderColor = "var(--glass-border)";
+      }
+    }
+
+    window.addEventListener('keydown', (e) => {
+      // Solo actuar si el usuario activó la opción del mando
+      if (!state.remoteEnabled || editorModal.classList.contains('active')) return;
+
+      switch(e.code) {
+        case 'Space':
+        case 'Enter':
+          e.preventDefault();
+          toggleScroll();
+          break;
+        case 'ArrowUp':
+          e.preventDefault();
+          changeSpeed(5);
+          break;
+        case 'ArrowDown':
+          e.preventDefault();
+          changeSpeed(-5);
+          break;
+        case 'ArrowLeft':
+          e.preventDefault();
+          resetPrompter();
+          break;
+        case 'KeyR':
+          e.preventDefault();
+          toggleRecording();
+          break;
+      }
+    });
+
+    function updateColumnWidth(val) {
+      state.columnWidth = val;
+      prompterWrapper.style.width = `${val}px`;
+      document.getElementById('col-width-val').innerText = `${val}px`;
+      localStorage.setItem('studio_col_width', val);
+      rebuildLayoutCache();
+      calculateMetrics();
+    }
+  </script>
+</body>
+</html>
